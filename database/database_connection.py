@@ -6,8 +6,8 @@ def get_connection():
     connection = pymysql.connect(
         host="localhost",
         user="root",
-        password="chrirolu1",
-        database="abschlussprojektmci",
+        password="1234",
+        database="abschlussproject_mci",
         port=3306
     )
     print("Verbindung erfolgreich!")
@@ -135,12 +135,11 @@ def get_ekgs_by_patients(patient_id):
 
 
 def save_analysis_result(result_data: dict) -> int:
-
     conn = get_connection()
     cursor = conn.cursor()
 
     sql = """
-    INSERT INTO analysis_results
+    INSERT INTO diagnosis_result
     (
         ekg_id,
         heart_rate,
@@ -165,14 +164,10 @@ def save_analysis_result(result_data: dict) -> int:
     """
 
     cursor.execute(sql, result_data)
-
     conn.commit()
-
     result_id = cursor.lastrowid
-
     cursor.close()
     conn.close()
-
     return result_id
 
 def get_results_by_ekg_id(ekg_data):
