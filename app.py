@@ -4,6 +4,7 @@ from database.database_connection import *
 from ekg_processing.ekg import EKGdata
 from pathlib import Path
 from machine_learning.prediction import Prediction
+from reports.reports import generate_pdf
 
 
 def main():
@@ -20,8 +21,6 @@ def main():
         [
             "Dashboard",
             "Patients",
-            "New Analysis",
-            "Reports"
         ]
     )
 
@@ -29,10 +28,6 @@ def main():
         dashboard_page()
     elif menu == "Patients":
         patients_page()
-    elif menu == "New Analysis":
-        analysis_page()
-    elif menu == "Reports":
-        reports_page()
 
 
 # ------------------------------------------------------
@@ -99,7 +94,7 @@ def dashboard_page():
 
     # EKG laden und analysieren
     try:
-        ekg = EKGdata(selected_ekg[1])  # [1] = file_path
+        ekg = EKGdata(selected_ekg[1])
     except Exception as ex:
         st.error(f"Fehler beim Laden der EKG-Datei: {ex}")
         return
@@ -119,14 +114,15 @@ def dashboard_page():
     c3.metric("RR Interval",    f"{features['rr_mean']} ms")
     c4.metric("HRV",            f"{features['hrv']} ms")
 
-# ML Diagnose
+    # ML Diagnose
     st.subheader("Machine Learning Diagnosis")
+    result = None
 
     try:
         prediction = Prediction()
         result = prediction.predict(features)
 
-        col_a, col_b, col_c = st.columns(3)
+        col_a, col_b = st.columns(2)
 
         with col_a:
             st.markdown("**Predicted Diagnosis**")
@@ -137,16 +133,7 @@ def dashboard_page():
             st.markdown(f"### {result['confidence']} %")
             st.progress(result['confidence'] / 100)
 
-        with col_c:
-            st.markdown("**Risk Level**")
-            if result['predicted_class'] == "Normal":
-                st.success("🟢 Low — Status: Normal")
-            elif result['predicted_class'] in ["Tachykardie", "Bradykardie"]:
-                st.warning("🟡 Medium")
-            else:
-                st.error("🔴 High")
-
-        # Automatisch speichern - aber nur einmal pro EKG
+        # Automatisch speichern
         ekg_key = f"saved_ekg_{selected_ekg[0]}"
         if not st.session_state.get(ekg_key):
             result_data = {
@@ -161,7 +148,7 @@ def dashboard_page():
             }
             result_id = save_analysis_result(result_data)
             st.session_state[ekg_key] = result_id
-            st.success(f"Analyse automatisch gespeichert!")
+            st.success("Analyse automatisch gespeichert!")
 
         st.session_state["result_id"] = st.session_state.get(ekg_key)
 
@@ -169,6 +156,40 @@ def dashboard_page():
         st.error(f"Modell nicht gefunden: {e}")
     except Exception as e:
         st.error(f"Fehler bei der Diagnose: {e}")
+
+    # PDF generieren
+    if result is not None:
+        st.divider()
+        st.subheader("Report")
+
+        if st.button("Generate PDF Report"):
+            report_dir = Path("reports/")
+            report_dir.mkdir(parents=True, exist_ok=True)
+
+            pdf_path = str(report_dir / f"report_patient_{patient_id}_{selected_ekg[0]}.pdf")
+
+            generate_pdf(
+                patient=selected_patient,
+                features=features,
+                result=result,
+                ekg_fig=fig,
+                output_path=pdf_path
+            )
+
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    label="Download Report",
+                    data=f,
+                    file_name=f"ekg_report_{patient_id}.pdf",
+                    mime="application/pdf"
+                )
+            save_report({
+                    "ekg_id":       selected_ekg[0],
+                    "diagnosis_id": st.session_state["result_id"],
+                    "pdf_path":     pdf_path
+})
+
+
 # ------------------------------------------------------
 # Patienten
 # ------------------------------------------------------
@@ -193,28 +214,6 @@ def patients_page():
         create_patient(patient_data)
         st.success("Patient erfolgreich angelegt!")
 
-
-# ------------------------------------------------------
-# Neue Analyse
-# ------------------------------------------------------
-
-def analysis_page():
-
-    st.header("New ECG Analysis")
-    st.info("Wird noch implementiert.")
-
-
-# ------------------------------------------------------
-# Reports
-# ------------------------------------------------------
-
-def reports_page():
-
-    st.header("Reports")
-    st.info("Wird noch implementiert.")
-
-
-# ------------------------------------------------------
 
 if __name__ == "__main__":
     main()
