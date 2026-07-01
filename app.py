@@ -5,6 +5,7 @@ from ekg_processing.ekg import EKGdata
 from pathlib import Path
 from machine_learning.prediction import Prediction
 from reports.reports import generate_pdf
+from datetime import date
 
 
 def main():
@@ -38,11 +39,14 @@ def dashboard_page():
 
     st.header("Dashboard")
 
-    persons = get_all_patients()
+    persons_df = get_all_patients()
 
-    if not persons:
+    if persons_df.empty:
         st.warning("Keine Patienten vorhanden. Bitte zuerst einen Patienten anlegen.")
         return
+
+    # DataFrame in Liste von Dicts umwandeln
+    persons = persons_df.to_dict("records")
 
     col1, col2 = st.columns(2)
 
@@ -51,13 +55,13 @@ def dashboard_page():
         selected_patient = st.selectbox(
             "Select Patient",
             options=persons,
-            format_func=lambda p: f"{p[1]} {p[2]}"
+            format_func=lambda p: f"{p['Vorname']} {p['Nachname']}"
         )
-        patient_id = selected_patient[0]
+        patient_id = selected_patient["id"]
 
-        st.markdown(f"**Name:** {selected_patient[1]} {selected_patient[2]}")
-        st.markdown(f"**Date of Birth:** {selected_patient[3]}")
-        st.markdown(f"**Gender:** {selected_patient[4]}")
+        st.markdown(f"**Name:** {selected_patient['Vorname']} {selected_patient['Nachname']}")
+        st.markdown(f"**Date of Birth:** {selected_patient['Geburtsdatum']}")
+        st.markdown(f"**Gender:** {selected_patient['Gender']}")
 
     with col2:
         st.subheader("ECG File Upload")
@@ -80,21 +84,23 @@ def dashboard_page():
 
     # EKG auswählen
     st.divider()
-    ekgs = get_ekgs_by_patients(patient_id)
+    ekgs_df = get_ekgs_by_patients(patient_id)
 
-    if not ekgs:
+    if ekgs_df.empty:
         st.info("Noch keine EKG-Daten für diesen Patienten vorhanden.")
         return
+
+    ekgs = ekgs_df.to_dict("records")
 
     selected_ekg = st.selectbox(
         "EKG-Aufnahme auswählen",
         options=ekgs,
-        format_func=lambda e: f"EKG {e[0]} — {e[3]}"
+        format_func=lambda e: f"EKG {e['idekg_records']} — {e['recording_date']}"
     )
 
     # EKG laden und analysieren
     try:
-        ekg = EKGdata(selected_ekg[1])
+        ekg = EKGdata(selected_ekg["file_path"])
     except Exception as ex:
         st.error(f"Fehler beim Laden der EKG-Datei: {ex}")
         return
@@ -134,10 +140,10 @@ def dashboard_page():
             st.progress(result['confidence'] / 100)
 
         # Automatisch speichern
-        ekg_key = f"saved_ekg_{selected_ekg[0]}"
+        ekg_key = f"saved_ekg_{selected_ekg['idekg_records']}"
         if not st.session_state.get(ekg_key):
             result_data = {
-                "ekg_id":          selected_ekg[0],
+                "ekg_id":          selected_ekg["idekg_records"],
                 "heart_rate":      features["heart_rate"],
                 "max_heart_rate":  features["max_heart_rate"],
                 "rr_mean":         features["rr_mean"],
@@ -166,10 +172,19 @@ def dashboard_page():
             report_dir = Path("reports/")
             report_dir.mkdir(parents=True, exist_ok=True)
 
-            pdf_path = str(report_dir / f"report_patient_{patient_id}_{selected_ekg[0]}.pdf")
+            pdf_path = str(report_dir / f"report_patient_{patient_id}_{selected_ekg['idekg_records']}.pdf")
+
+            # Patient als Tuple für generate_pdf
+            patient_tuple = (
+                selected_patient["id"],
+                selected_patient["Vorname"],
+                selected_patient["Nachname"],
+                selected_patient["Geburtsdatum"],
+                selected_patient["Gender"]
+            )
 
             generate_pdf(
-                patient=selected_patient,
+                patient=patient_tuple,
                 features=features,
                 result=result,
                 ekg_fig=fig,
@@ -183,11 +198,12 @@ def dashboard_page():
                     file_name=f"ekg_report_{patient_id}.pdf",
                     mime="application/pdf"
                 )
+
             save_report({
-                    "ekg_id":       selected_ekg[0],
-                    "diagnosis_id": st.session_state["result_id"],
-                    "pdf_path":     pdf_path
-})
+                "ekg_id":       selected_ekg["idekg_records"],
+                "diagnosis_id": st.session_state["result_id"],
+                "pdf_path":     pdf_path
+            })
 
 
 # ------------------------------------------------------
@@ -201,8 +217,13 @@ def patients_page():
 
     first_name = st.text_input("First Name")
     last_name  = st.text_input("Last Name")
-    birth_date = st.date_input("Date of Birth")
-    sex        = st.selectbox("Gender", ["Male", "Female", "Diverse"])
+    birth_date = st.date_input(
+        "Date of Birth",
+        value=date(1990, 1, 1),
+        min_value=date(1900, 1, 1),
+        max_value=date.today()
+    )
+    sex = st.selectbox("Gender", ["Male", "Female", "Diverse"])
 
     if st.button("Create Patient"):
         patient_data = {

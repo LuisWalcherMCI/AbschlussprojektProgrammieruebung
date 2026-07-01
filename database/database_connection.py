@@ -1,24 +1,17 @@
-import pymysql
+import streamlit as st
+from sqlalchemy import text
 from datetime import date
-from pathlib import Path
 
 
-def get_connection():
+def get_conn():
     """
-    Stellt eine Verbindung zur MySQL-Datenbank her.
+    Stellt eine Verbindung zur Supabase PostgreSQL Datenbank her
+    über Streamlit Connection (nutzt secrets.toml Konfiguration).
 
     Returns:
-        pymysql.Connection: Aktive Datenbankverbindung.
+        st.connection: Aktive Datenbankverbindung.
     """
-    connection = pymysql.connect(
-        host="localhost",
-        user="root",
-        password="1234",
-        database="abschlussproject_mci",
-        port=3306
-    )
-    print("Verbindung erfolgreich!")
-    return connection
+    return st.connection("supabase", type="sql")
 
 
 def get_all_patients():
@@ -26,21 +19,11 @@ def get_all_patients():
     Gibt alle Patienten aus der Datenbank zurück.
 
     Returns:
-        list[tuple]: Liste aller Patientendatensätze als Tuples.
-                     Format: (id, Vorname, Nachname, Geburtsdatum, Gender)
+        pd.DataFrame: DataFrame mit allen Patientendatensätzen.
+                      Spalten: id, Vorname, Nachname, Geburtsdatum, Gender
     """
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor()
-        sql = "SELECT * FROM patient"
-        cursor.execute(sql)
-        patients = cursor.fetchall()
-        return patients
-
-    finally:
-        cursor.close()
-        conn.close()
+    conn = get_conn()
+    return conn.query('SELECT * FROM patient;')
 
 
 def create_patient(patient_dict):
@@ -58,59 +41,36 @@ def create_patient(patient_dict):
     Returns:
         None
     """
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor()
-
-        sql = """
-            INSERT INTO patient (
-                Vorname,
-                Nachname,
-                Geburtsdatum,
-                Gender)
-            VALUES
-            (
-                %(vorname)s,
-                %(nachname)s,
-                %(geburtsdatum)s,
-                %(gender)s
-            )
-        """
-        cursor.execute(sql, patient_dict)
-        conn.commit()
-
-    finally:
-        cursor.close()
-        conn.close()
+    conn = get_conn()
+    with conn.session as s:
+        sql = text("""
+            INSERT INTO patient ("Vorname", "Nachname", "Geburtsdatum", "Gender")
+            VALUES (:vorname, :nachname, :geburtsdatum, :gender)
+        """)
+        s.execute(sql, {
+            "vorname":      patient_dict['vorname'],
+            "nachname":     patient_dict['nachname'],
+            "geburtsdatum": patient_dict['geburtsdatum'],
+            "gender":       patient_dict['gender']
+        })
+        s.commit()
 
 
-def get_patient_by_id(id):
+def get_patient_by_id(patient_id: int):
     """
     Gibt einen einzelnen Patienten anhand seiner ID zurück.
 
     Args:
-        id (int): Die ID des gesuchten Patienten.
+        patient_id (int): Die ID des gesuchten Patienten.
 
     Returns:
-        tuple | None: Patientendatensatz als Tuple oder None wenn nicht gefunden.
-                      Format: (id, Vorname, Nachname, Geburtsdatum, Gender)
+        pd.DataFrame: DataFrame mit dem Patientendatensatz oder leer wenn nicht gefunden.
     """
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor()
-        sql = "SELECT * FROM patient WHERE id = %(id)s"
-        cursor.execute(sql, {"id": id})
-        patient = cursor.fetchone()
-        return patient
-
-    finally:
-        cursor.close()
-        conn.close()
+    conn = get_conn()
+    return conn.query(f'SELECT * FROM patient WHERE id = {patient_id};')
 
 
-def create_ekg_data(data_name, patient_id):
+def create_ekg_data(data_name: str, patient_id: int):
     """
     Legt einen neuen EKG-Datensatz in der Datenbank an und verknüpft
     ihn mit einem Patienten.
@@ -122,40 +82,21 @@ def create_ekg_data(data_name, patient_id):
     Returns:
         None
     """
-    conn = get_connection()
-    recording_date = date.today()
-
-    try:
-        cursor = conn.cursor()
-
-        sql = """
-            INSERT INTO ekg_records (
-                file_path,
-                recording_date,
-                patient_id
-            )
-            VALUES (
-                %(data_name)s,
-                %(recording_date)s,
-                %(patient_id)s
-            )
-        """
-
-        params = {
-            "data_name": data_name,
-            "recording_date": recording_date,
-            "patient_id": patient_id
-        }
-
-        cursor.execute(sql, params)
-        conn.commit()
-
-    finally:
-        cursor.close()
-        conn.close()
+    conn = get_conn()
+    with conn.session as s:
+        sql = text("""
+            INSERT INTO ekg_records (file_path, recording_date, patient_id)
+            VALUES (:data_name, :recording_date, :patient_id)
+        """)
+        s.execute(sql, {
+            "data_name":      data_name,
+            "recording_date": date.today(),
+            "patient_id":     patient_id
+        })
+        s.commit()
 
 
-def get_ekgs_by_patients(patient_id):
+def get_ekgs_by_patients(patient_id: int):
     """
     Gibt alle EKG-Datensätze eines bestimmten Patienten zurück.
 
@@ -163,21 +104,11 @@ def get_ekgs_by_patients(patient_id):
         patient_id (int): ID des Patienten.
 
     Returns:
-        list[tuple]: Liste aller EKG-Datensätze des Patienten als Tuples.
-                     Format: (idekg_records, file_path, recording_date, patient_id)
+        pd.DataFrame: DataFrame mit allen EKG-Datensätzen des Patienten.
+                      Spalten: idekg_records, file_path, recording_date, patient_id
     """
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor()
-        sql = "SELECT * FROM ekg_records WHERE patient_id = %(patient_id)s"
-        cursor.execute(sql, {"patient_id": patient_id})
-        ekg_data = cursor.fetchall()
-        return ekg_data
-
-    finally:
-        cursor.close()
-        conn.close()
+    conn = get_conn()
+    return conn.query(f'SELECT * FROM ekg_records WHERE patient_id = {patient_id};')
 
 
 def save_analysis_result(result_data: dict) -> int:
@@ -199,66 +130,32 @@ def save_analysis_result(result_data: dict) -> int:
     Returns:
         int: ID des neu erstellten Analysedatensatzes.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    sql = """
-    INSERT INTO diagnosis_result
-    (
-        ekg_id,
-        heart_rate,
-        max_heart_rate,
-        rr_mean,
-        rr_std,
-        hrv,
-        predicted_class,
-        confidence
-    )
-    VALUES
-    (
-        %(ekg_id)s,
-        %(heart_rate)s,
-        %(max_heart_rate)s,
-        %(rr_mean)s,
-        %(rr_std)s,
-        %(hrv)s,
-        %(predicted_class)s,
-        %(confidence)s
-    )
-    """
-
-    cursor.execute(sql, result_data)
-    conn.commit()
-    result_id = cursor.lastrowid
-    cursor.close()
-    conn.close()
-    return result_id
+    conn = get_conn()
+    with conn.session as s:
+        sql = text("""
+            INSERT INTO diagnosis_result
+            (ekg_id, heart_rate, max_heart_rate, rr_mean, rr_std, hrv, predicted_class, confidence)
+            VALUES
+            (:ekg_id, :heart_rate, :max_heart_rate, :rr_mean, :rr_std, :hrv, :predicted_class, :confidence)
+            RETURNING iddiagnosis_result
+        """)
+        result = s.execute(sql, result_data)
+        s.commit()
+        return result.fetchone()[0]
 
 
-def get_results_by_ekg_id(ekg_data):
+def get_results_by_ekg_id(ekg_id: int):
     """
     Gibt das Analyseergebnis für ein bestimmtes EKG zurück.
 
     Args:
-        ekg_data (tuple): EKG-Datensatz Tuple aus der Datenbank.
-                          Die ID wird aus Index [0] entnommen.
+        ekg_id (int): ID des EKGs.
 
     Returns:
-        tuple | None: Analyseergebnis als Tuple oder None wenn nicht gefunden.
+        pd.DataFrame: DataFrame mit dem Analyseergebnis oder leer wenn nicht gefunden.
     """
-    conn = get_connection()
-    ekg_id = ekg_data[0]
-
-    try:
-        cursor = conn.cursor()
-        sql = "SELECT * FROM diagnosis_result WHERE ekg_id = %(ekg_id)s"
-        cursor.execute(sql, {"ekg_id": ekg_id})
-        diagnosis_result = cursor.fetchone()
-        return diagnosis_result
-
-    finally:
-        cursor.close()
-        conn.close()
+    conn = get_conn()
+    return conn.query(f'SELECT * FROM diagnosis_result WHERE ekg_id = {ekg_id};')
 
 
 def save_report(report_data: dict) -> int:
@@ -275,23 +172,39 @@ def save_report(report_data: dict) -> int:
     Returns:
         int: ID des neu erstellten Report-Eintrags.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
+    conn = get_conn()
+    with conn.session as s:
+        sql = text("""
+            INSERT INTO reports (ekg_id, diagnosis_id, pdf_path)
+            VALUES (:ekg_id, :diagnosis_id, :pdf_path)
+            RETURNING idreports
+        """)
+        result = s.execute(sql, report_data)
+        s.commit()
+        return result.fetchone()[0]
 
-    sql = """
-        INSERT INTO reports (ekg_id, diagnosis_id, pdf_path)
-        VALUES (%(ekg_id)s, %(diagnosis_id)s, %(pdf_path)s)
+
+def get_all_reports():
     """
+    Gibt alle gespeicherten Reports mit Patienten- und Diagnoseinformationen zurück.
 
-    cursor.execute(sql, report_data)
-    conn.commit()
-    report_id = cursor.lastrowid
-    cursor.close()
-    conn.close()
-    return report_id
-
+    Returns:
+        pd.DataFrame: DataFrame mit allen Reports und verknüpften Daten.
+                      Spalten: idreports, pdf_path, created_at,
+                               Vorname, Nachname, predicted_class, confidence
+    """
+    conn = get_conn()
+    return conn.query("""
+        SELECT r.idreports, r.pdf_path, r.created_at,
+               p."Vorname", p."Nachname",
+               d.predicted_class, d.confidence
+        FROM reports r
+        JOIN diagnosis_result d ON r.diagnosis_id = d.iddiagnosis_result
+        JOIN ekg_records e ON r.ekg_id = e.idekg_records
+        JOIN patient p ON e.patient_id = p.id
+        ORDER BY r.created_at DESC;
+    """)
 
 
 if __name__ == "__main__":
-    patients = get_all_patients()
-    print(patients)
+    st.write("Datenbank-Service bereit.")
